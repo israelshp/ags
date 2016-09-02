@@ -1,6 +1,10 @@
+# -*- coding: utf-8 -*-
+
 import os
 import arcpy
 import sys
+
+import subprocess
 
 from config import *
 
@@ -12,36 +16,59 @@ class LayoutTableError(Exception):
 
 
 class LayoutTable:
-    def __init__(self, mxd=None, SP=None):
+    def __init__(self, mxd=None, cell_base_name=None, header_base_name=None):
         """
         Create new LayoutTable instance for a specific map document.
+        :param cell_base_name:
+        :param header_base_name:
         :param mxd: Path to the map document
-        :param SP: gsdfgsdg
+        :param cell_base_name: The name of the base cell text element
+        :param header_base_name: The name of the base header text element
         :return: None
         """
+
+        if cell_base_name:
+            self._cell_base_name = cell_base_name
+        else:
+            self._cell_base_name = BASE_ELEMENT_NAME
+        if header_base_name:
+            self._header_base_name = header_base_name
+        else:
+            self._header_base_name = HEADER_BASE_ELEMENT_NAME
 
         if not mxd:
             self.mxd = arcpy.mapping.MapDocument("current")
         try:
             if isinstance(mxd, str):
-                # assert os.path.exists(mxd)
+                assert os.path.exists(mxd)
                 self.mxd = arcpy.mapping.MapDocument(mxd)
             elif isinstance(mxd, arcpy.mapping.MapDocument):
                 self.mxd = mxd
 
             self.base_element = \
-                arcpy.mapping.ListLayoutElements(self.mxd, "TEXT_ELEMENT", BASE_ELEMENT_NAME)[0]
+                arcpy.mapping.ListLayoutElements(self.mxd, "TEXT_ELEMENT", self._cell_base_name)[0]
             self.header_base_element = \
-                arcpy.mapping.ListLayoutElements(self.mxd, "TEXT_ELEMENT", HEADER_BASE_ELEMENT_NAME)[0]
+                arcpy.mapping.ListLayoutElements(self.mxd, "TEXT_ELEMENT", self._header_base_name)[0]
         except IndexError:
             raise LayoutTableError("Base layout element for cell or header was not found in the map document.")
         except AssertionError as e:
             print e.message
             raise sys.exit(1)
-        self.SP = SP
+        self.filter = ""
 
         self.COL_SPACE = self.base_element.elementWidth
         self.ROW_SPACE = self.base_element.elementHeight
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        del self.mxd
+        print "MXD instance was deleted (__exit__)"
+
+    # def __del__(self):
+    #     del self.mxd
+    #     print "MXD instance was deleted (__del__)"
 
     def _create_cell(self, text, column, row):
         new_element = self.base_element.clone("_{}_{}".format(column, row))
@@ -73,11 +100,7 @@ class LayoutTable:
             self._create_header(f, fields.index(f))
         row, col = 0, 0
 
-        if self.SP:
-            where_clause = "\"SP\"='{}'".format(self.SP)
-        else:
-            where_clause = ""
-        with arcpy.da.SearchCursor(fc, fields, where_clause) as cursor:
+        with arcpy.da.SearchCursor(fc, fields, self.filter) as cursor:
             for feature in cursor:
                 for data in feature:
                     try:
@@ -122,9 +145,4 @@ class LayoutTable:
         except KeyError:
             return name
 
-    def tdp_table(self):
-        try:
-            self.create_table('tdp_lines', ["FromName", "EndX", "EndY", "Angle", "Shape.STLength()", "ToName"])
-        finally:
-            self.base_element.text = " "
-            self.header_base_element.text = " "
+
